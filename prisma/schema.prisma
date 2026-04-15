@@ -1,0 +1,84 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Employee {
+  id        String   @id @default(cuid())
+  name      String
+  active    Boolean  @default(true)
+  startDate DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  timeEntries        TimeEntry[]
+  statHolidayEntries StatHolidayEntry[]
+
+  @@map("employees")
+}
+
+model PayPeriod {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  startDate DateTime
+  endDate   DateTime
+  createdAt DateTime @default(now())
+
+  timeEntries TimeEntry[]
+
+  @@map("pay_periods")
+}
+
+model TimeEntry {
+  id           String    @id @default(cuid())
+  employeeId   String
+  payPeriodId  String
+  date         DateTime?
+  clockIn      String?
+  clockOut     String?
+  hours        Float     @default(0)
+  minutes      Int       @default(0)
+  isAdmin      Boolean   @default(false)
+  adminHours   Float?
+  adminMinutes Int?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  payPeriod PayPeriod @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, payPeriodId, date])
+  @@map("time_entries")
+}
+
+model StatHoliday {
+  id          String   @id @default(cuid())
+  name        String
+  displayName String
+  date        DateTime
+  windowStart DateTime
+  windowEnd   DateTime
+  createdAt   DateTime @default(now())
+
+  entries StatHolidayEntry[]
+
+  @@map("stat_holidays")
+}
+
+model StatHolidayEntry {
+  id            String @id @default(cuid())
+  statHolidayId String
+  employeeId    String
+  totalHours    Float  @default(0)
+  statPayHours  Float  @default(0)
+
+  statHoliday StatHoliday @relation(fields: [statHolidayId], references: [id], onDelete: Cascade)
+  employee    Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([statHolidayId, employeeId])
+  @@map("stat_holiday_entries")
+}
