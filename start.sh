@@ -16,4 +16,4 @@ else
 fi
 
 echo "Starting server..."
-exec node .next/standalone/server.js
+exec npm start
