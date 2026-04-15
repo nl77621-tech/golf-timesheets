@@ -222,9 +222,21 @@ function TimesheetsContent() {
         {/* Add/Edit Form */}
         {showForm && (
           <div className="bg-white rounded-xl shadow-sm border p-5 mb-6">
-            <h2 className="text-lg font-semibold mb-4">
-              {editingEntry ? 'Edit Entry' : 'Add Time Entry'}
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">
+                {editingEntry ? 'Edit Entry' : 'Add Time Entry'}
+              </h2>
+              {currentPeriodObj && (
+                <span className="text-sm text-green-700 font-medium bg-green-50 px-3 py-1 rounded-full border border-green-200">
+                  Adding to: {currentPeriodObj.name}
+                </span>
+              )}
+            </div>
+            {!editingEntry && (
+              <p className="text-sm text-gray-500 mb-4">
+                💡 To enter time for a different week, close this form, select the correct pay period from the dropdown above, then click + Add Entry.
+              </p>
+            )}
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
@@ -241,13 +253,18 @@ function TimesheetsContent() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Date</label>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">
+                    Date
+                    {currentPeriodObj && (
+                      <span className="ml-2 text-xs text-gray-400 font-normal">
+                        ({currentPeriodObj.startDate.split('T')[0]} – {currentPeriodObj.endDate.split('T')[0]})
+                      </span>
+                    )}
+                  </label>
                   <input
                     type="date"
                     value={formDate}
                     onChange={(e) => setFormDate(e.target.value)}
-                    min={currentPeriodObj?.startDate.split('T')[0]}
-                    max={currentPeriodObj?.endDate.split('T')[0]}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
                   />
                 </div>
