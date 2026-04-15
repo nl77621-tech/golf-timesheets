@@ -16,4 +16,4 @@ else
 fi
 
 echo "Starting server..."
-exec npm start
+exec node server.js
