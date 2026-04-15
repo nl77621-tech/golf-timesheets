@@ -2,72 +2,79 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { calculateDuration } from '@/lib/timeCalc'
 
-function getTodayDateString() {
+// Get current date/time strings in Toronto timezone
+function getTorontoDateTime() {
   const now = new Date()
-  return now.toISOString().split('T')[0]
-}
-
-function getCurrentTimeString() {
-  const now = new Date()
-  return now.toLocaleTimeString('en-CA', {
+  // Format date parts in Toronto timezone
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Toronto',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-    timeZone: 'America/Toronto',
   })
-}
+  const parts = fmt.formatToParts(now)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
+  const year = get('year')
+  const month = get('month')
+  const day = get('day')
+  const hour = get('hour')
+  const minute = get('minute')
 
-function getTodayInToronto() {
-  const now = new Date()
-  const torontoDate = new Date(now.toLocaleString('en-CA', { timeZone: 'America/Toronto' }))
-  return torontoDate
+  const dateStr = `${year}-${month}-${day}` // "2026-04-15"
+  const timeStr = `${hour}:${minute}`        // "14:30"
+
+  // Build a proper Date at start/end of today in UTC by parsing the Toronto date
+  const startOfDay = new Date(`${dateStr}T00:00:00.000Z`)
+  const endOfDay = new Date(`${dateStr}T23:59:59.999Z`)
+  // For pay period comparison, use a mid-day timestamp
+  const todayMidDay = new Date(`${dateStr}T12:00:00.000Z`)
+
+  return { dateStr, timeStr, startOfDay, endOfDay, todayMidDay }
 }
 
 // GET: return all active employees with their clock status for today
 export async function GET() {
   try {
-    const today = getTodayInToronto()
-    const todayStr = getTodayDateString()
-    const startOfDay = new Date(todayStr + 'T00:00:00.000Z')
-    const endOfDay = new Date(todayStr + 'T23:59:59.999Z')
+    const { startOfDay, endOfDay, todayMidDay } = getTorontoDateTime()
 
-    const employees = await prisma.employee.findMany({
-      where: { active: true },
-      orderBy: { name: 'asc' },
-    })
-
-    // Find current pay period
-    const payPeriod = await prisma.payPeriod.findFirst({
-      where: {
-        startDate: { lte: today },
-        endDate: { gte: today },
-      },
-    })
-
-    // Get today's time entries for all employees
-    const todayEntries = await prisma.timeEntry.findMany({
-      where: {
-        date: { gte: startOfDay, lte: endOfDay },
-        isAdmin: false,
-      },
-    })
+    const [employees, payPeriod, todayEntries] = await Promise.all([
+      prisma.employee.findMany({
+        where: { active: true },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.payPeriod.findFirst({
+        where: {
+          startDate: { lte: todayMidDay },
+          endDate: { gte: todayMidDay },
+        },
+      }),
+      prisma.timeEntry.findMany({
+        where: {
+          date: { gte: startOfDay, lte: endOfDay },
+          isAdmin: false,
+        },
+      }),
+    ])
 
     const employeesWithStatus = employees.map((emp) => {
       const entry = todayEntries.find((e) => e.employeeId === emp.id)
-      const isClockedIn = entry && entry.clockIn && !entry.clockOut
+      const isClockedIn = !!(entry && entry.clockIn && !entry.clockOut)
       return {
         id: emp.id,
         name: emp.name,
-        isClockedIn: !!isClockedIn,
-        clockInTime: isClockedIn ? entry.clockIn : null,
-        entryId: entry?.id || null,
+        isClockedIn,
+        clockInTime: isClockedIn ? entry!.clockIn : null,
+        entryId: entry?.id ?? null,
       }
     })
 
     return NextResponse.json({ employees: employeesWithStatus, payPeriod })
   } catch (error) {
     console.error('Clock GET error:', error)
-    return NextResponse.json({ error: 'Failed to load employees' }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to load employees', detail: String(error) }, { status: 500 })
   }
 }
 
@@ -77,81 +84,69 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { employeeId, action } = body // action: 'in' | 'out'
 
-    const today = getTodayInToronto()
-    const todayStr = getTodayDateString()
-    const currentTime = getCurrentTimeString()
-    const startOfDay = new Date(todayStr + 'T00:00:00.000Z')
-    const endOfDay = new Date(todayStr + 'T23:59:59.999Z')
+    const { dateStr, timeStr, startOfDay, endOfDay, todayMidDay } = getTorontoDateTime()
 
-    // Find current pay period
-    const payPeriod = await prisma.payPeriod.findFirst({
-      where: {
-        startDate: { lte: today },
-        endDate: { gte: today },
-      },
-    })
+    const [payPeriod, existingEntry] = await Promise.all([
+      prisma.payPeriod.findFirst({
+        where: {
+          startDate: { lte: todayMidDay },
+          endDate: { gte: todayMidDay },
+        },
+      }),
+      prisma.timeEntry.findFirst({
+        where: {
+          employeeId,
+          date: { gte: startOfDay, lte: endOfDay },
+          isAdmin: false,
+        },
+      }),
+    ])
 
     if (!payPeriod) {
       return NextResponse.json({ error: 'No active pay period for today' }, { status: 400 })
     }
 
-    // Find existing entry for today
-    const existingEntry = await prisma.timeEntry.findFirst({
-      where: {
-        employeeId,
-        date: { gte: startOfDay, lte: endOfDay },
-        isAdmin: false,
-      },
-    })
-
     if (action === 'in') {
-      if (existingEntry && existingEntry.clockIn && !existingEntry.clockOut) {
+      if (existingEntry?.clockIn && !existingEntry?.clockOut) {
         return NextResponse.json({ error: 'Already clocked in' }, { status: 400 })
       }
-
-      // Create new entry or update existing one that has no clockIn
       if (existingEntry) {
         const updated = await prisma.timeEntry.update({
           where: { id: existingEntry.id },
-          data: { clockIn: currentTime, clockOut: null, hours: 0, minutes: 0 },
+          data: { clockIn: timeStr, clockOut: null, hours: 0, minutes: 0 },
         })
-        return NextResponse.json({ success: true, entry: updated, time: currentTime })
+        return NextResponse.json({ success: true, entry: updated, time: timeStr })
       } else {
         const created = await prisma.timeEntry.create({
           data: {
             employeeId,
             payPeriodId: payPeriod.id,
-            date: today,
-            clockIn: currentTime,
+            date: new Date(`${dateStr}T12:00:00.000Z`),
+            clockIn: timeStr,
             clockOut: null,
             hours: 0,
             minutes: 0,
             isAdmin: false,
           },
         })
-        return NextResponse.json({ success: true, entry: created, time: currentTime })
+        return NextResponse.json({ success: true, entry: created, time: timeStr })
       }
     } else if (action === 'out') {
-      if (!existingEntry || !existingEntry.clockIn) {
+      if (!existingEntry?.clockIn) {
         return NextResponse.json({ error: 'Not clocked in today' }, { status: 400 })
       }
       if (existingEntry.clockOut) {
         return NextResponse.json({ error: 'Already clocked out' }, { status: 400 })
       }
-
-      const duration = calculateDuration(existingEntry.clockIn, currentTime)
+      const duration = calculateDuration(existingEntry.clockIn, timeStr)
       const updated = await prisma.timeEntry.update({
         where: { id: existingEntry.id },
-        data: {
-          clockOut: currentTime,
-          hours: duration.hours,
-          minutes: duration.minutes,
-        },
+        data: { clockOut: timeStr, hours: duration.hours, minutes: duration.minutes },
       })
       return NextResponse.json({
         success: true,
         entry: updated,
-        time: currentTime,
+        time: timeStr,
         hoursWorked: duration.hours + duration.minutes / 60,
         clockIn: existingEntry.clockIn,
       })
@@ -160,6 +155,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
   } catch (error) {
     console.error('Clock POST error:', error)
-    return NextResponse.json({ error: 'Failed to process clock action' }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to process clock action', detail: String(error) }, { status: 500 })
   }
 }
