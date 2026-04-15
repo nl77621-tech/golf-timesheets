@@ -104,13 +104,21 @@ export default function DashboardPage() {
           <div className="flex items-center justify-center h-64 text-gray-500">Loading...</div>
         ) : (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-3">
               <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-              {currentPeriod && (
-                <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">
-                  Current Period: {currentPeriod.name}
-                </span>
-              )}
+              <div className="flex items-center gap-3">
+                <Link
+                  href="/qr-code"
+                  className="flex items-center gap-2 bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                >
+                  📱 QR Clock-In
+                </Link>
+                {currentPeriod && (
+                  <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">
+                    Current Period: {currentPeriod.name}
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
