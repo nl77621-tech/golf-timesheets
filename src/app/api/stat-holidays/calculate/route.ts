@@ -31,13 +31,6 @@ export async function POST(request: NextRequest) {
     let totalHours = 0
 
     for (const period of overlappingPeriods) {
-      // Calculate overlap proportion
-      const periodStart = new Date(Math.max(period.startDate.getTime(), holiday.windowStart.getTime()))
-      const periodEnd = new Date(Math.min(period.endDate.getTime(), holiday.windowEnd.getTime()))
-      const periodLength = (period.endDate.getTime() - period.startDate.getTime()) / (1000 * 60 * 60 * 24) + 1
-      const overlapLength = (periodEnd.getTime() - periodStart.getTime()) / (1000 * 60 * 60 * 24) + 1
-      const proportion = overlapLength / periodLength
-
       // Get time entries for this employee in this period
       const entries = await prisma.timeEntry.findMany({
         where: {
@@ -55,11 +48,22 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // Calculate overlap proportion using milliseconds for accuracy
+      const periodStart = Math.max(period.startDate.getTime(), holiday.windowStart.getTime())
+      const periodEnd = Math.min(period.endDate.getTime(), holiday.windowEnd.getTime())
+      const periodDuration = period.endDate.getTime() - period.startDate.getTime()
+      const overlapDuration = periodEnd - periodStart
+      
+      // If overlap duration is negative or zero, skip this period
+      if (overlapDuration <= 0) continue
+      
+      const proportion = overlapDuration / periodDuration
+
       // Only count the proportional hours within the window
       totalHours += (periodMinutes / 60) * proportion
     }
 
-    const statPayHours = Math.round((totalHours / 20) * 100) / 100
+    const statPayHours = totalHours > 0 ? Math.round((totalHours / 20) * 100) / 100 : 0
 
     await prisma.statHolidayEntry.upsert({
       where: {
