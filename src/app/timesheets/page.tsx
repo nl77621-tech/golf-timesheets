@@ -13,6 +13,12 @@ interface TimeEntry {
   employee: Employee
 }
 
+interface BulkDayEntry {
+  date: string
+  hours: string
+  minutes: string
+}
+
 export default function TimesheetsPage() {
   return (
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-500">Loading...</div>}>
@@ -30,7 +36,10 @@ function TimesheetsContent() {
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [showBulk, setShowBulk] = useState(false)
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null)
+  const [bulkDays, setBulkDays] = useState<BulkDayEntry[]>([])
+  const [bulkSubmitting, setBulkSubmitting] = useState(false)
 
   // Form state
   const [formDate, setFormDate] = useState('')
@@ -78,6 +87,72 @@ function TimesheetsContent() {
   }, [selectedPeriod, selectedEmployee])
 
   useEffect(() => { loadEntries() }, [loadEntries])
+
+  function initializeBulkEntry() {
+    const period = payPeriods.find(p => p.id === selectedPeriod)
+    if (!period) return
+
+    const start = new Date(period.startDate)
+    const end = new Date(period.endDate)
+    const days: BulkDayEntry[] = []
+
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0]
+      const existing = entries.find(e => e.employeeId === selectedEmployee && e.date?.split('T')[0] === dateStr)
+      days.push({
+        date: dateStr,
+        hours: String(existing?.adminHours || existing?.hours || '0'),
+        minutes: String(existing?.adminMinutes || existing?.minutes || '0'),
+      })
+    }
+    setBulkDays(days)
+    setShowBulk(true)
+  }
+
+  async function handleBulkSubmit() {
+    if (!selectedEmployee || !selectedPeriod) return
+    setBulkSubmitting(true)
+
+    try {
+      for (const day of bulkDays) {
+        const hours = parseFloat(day.hours) || 0
+        const minutes = parseInt(day.minutes) || 0
+        if (hours === 0 && minutes === 0) continue
+
+        const existing = entries.find(e => e.employeeId === selectedEmployee && e.date?.split('T')[0] === day.date)
+
+        const body = {
+          employeeId: selectedEmployee,
+          payPeriodId: selectedPeriod,
+          date: day.date,
+          isAdmin: true,
+          adminHours: hours,
+          adminMinutes: minutes,
+          clockIn: null,
+          clockOut: null,
+        }
+
+        if (existing) {
+          await fetch(`/api/time-entries/${existing.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+        } else {
+          await fetch('/api/time-entries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+        }
+      }
+      setShowBulk(false)
+      setBulkDays([])
+      await loadEntries()
+    } finally {
+      setBulkSubmitting(false)
+    }
+  }
 
   function resetForm() {
     setFormDate('')
@@ -182,6 +257,19 @@ function TimesheetsContent() {
               Export Excel
             </button>
             <button
+              onClick={() => {
+                if (!selectedEmployee) {
+                  alert('Please select an employee first')
+                  return
+                }
+                initializeBulkEntry()
+              }}
+              disabled={!selectedEmployee || !selectedPeriod}
+              className="bg-purple-700 hover:bg-purple-800 text-white font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50 text-sm"
+            >
+              📅 Bulk Entry
+            </button>
+            <button
               onClick={() => { resetForm(); setShowForm(true) }}
               className="bg-green-700 hover:bg-green-800 text-white font-medium px-4 py-2 rounded-lg transition-colors text-sm"
             >
@@ -218,6 +306,91 @@ function TimesheetsContent() {
             </select>
           </div>
         </div>
+
+        {/* Bulk Entry Form */}
+        {showBulk && (
+          <div className="bg-white rounded-xl shadow-sm border p-5 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">📅 Bulk Entry for {selectedEmployee && employees.find(e => e.id === selectedEmployee)?.name}</h2>
+              {currentPeriodObj && (
+                <span className="text-sm text-purple-700 font-medium bg-purple-50 px-3 py-1 rounded-full border border-purple-200">
+                  {currentPeriodObj.name}
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-gray-500 mb-4">Enter hours for each day in the pay period. Leave as 0 to skip a day.</p>
+            <div className="overflow-x-auto mb-4">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="border px-3 py-2 text-left font-medium text-sm text-gray-700">Date</th>
+                    <th className="border px-3 py-2 text-left font-medium text-sm text-gray-700">Day</th>
+                    <th className="border px-3 py-2 text-center font-medium text-sm text-gray-700">Hours</th>
+                    <th className="border px-3 py-2 text-center font-medium text-sm text-gray-700">Minutes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bulkDays.map((day, idx) => {
+                    const dayName = new Date(day.date).toLocaleDateString('en-CA', { weekday: 'short' })
+                    return (
+                      <tr key={day.date} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                        <td className="border px-3 py-2 text-sm">{day.date}</td>
+                        <td className="border px-3 py-2 text-sm font-medium">{dayName}</td>
+                        <td className="border px-3 py-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={day.hours}
+                            onChange={(e) => {
+                              const newDays = [...bulkDays]
+                              newDays[idx].hours = e.target.value
+                              setBulkDays(newDays)
+                            }}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-center text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                          />
+                        </td>
+                        <td className="border px-3 py-2">
+                          <input
+                            type="number"
+                            min="0"
+                            max="59"
+                            step="15"
+                            value={day.minutes}
+                            onChange={(e) => {
+                              const newDays = [...bulkDays]
+                              newDays[idx].minutes = e.target.value
+                              setBulkDays(newDays)
+                            }}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-center text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                          />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={handleBulkSubmit}
+                disabled={bulkSubmitting}
+                className="bg-purple-700 hover:bg-purple-800 text-white font-medium px-6 py-2 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {bulkSubmitting ? 'Saving...' : '✓ Save All Days'}
+              </button>
+              <button
+                onClick={() => {
+                  setShowBulk(false)
+                  setBulkDays([])
+                }}
+                className="text-gray-600 hover:text-gray-800 font-medium px-6 py-2 rounded-lg border hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Add/Edit Form */}
         {showForm && (
@@ -347,7 +520,7 @@ function TimesheetsContent() {
           <div className="text-center py-8 text-gray-500">Loading...</div>
         ) : Object.keys(grouped).length === 0 ? (
           <div className="bg-white rounded-xl shadow-sm border p-8 text-center text-gray-400">
-            No time entries for this period yet. Click &quot;+ Add Entry&quot; to get started.
+            No time entries for this period yet. Click &quot;📅 Bulk Entry&quot; or &quot;+ Add Entry&quot; to get started.
           </div>
         ) : (
           <div className="space-y-6">
