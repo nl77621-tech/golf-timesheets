@@ -10,7 +10,7 @@ interface Employee {
   entryId: string | null
 }
 
-type Step = 'select' | 'confirm' | 'success' | 'error'
+type Step = 'select' | 'confirm' | 'success' | 'error' | 'edit'
 
 export default function ClockPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -21,6 +21,8 @@ export default function ClockPage() {
   const [resultDetail, setResultDetail] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [currentTime, setCurrentTime] = useState('')
+  const [editClockIn, setEditClockIn] = useState('')
+  const [editClockOut, setEditClockOut] = useState('')
 
   useEffect(() => {
     loadEmployees()
@@ -108,9 +110,63 @@ export default function ClockPage() {
     }
   }
 
+  async function handleEditSave() {
+    if (!selected || !selected.entryId) return
+    setSubmitting(true)
+    try {
+      const res = await fetch(`/api/time-entries/${selected.entryId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clockIn: editClockIn,
+          clockOut: editClockOut || null,
+          isAdmin: false,
+        }),
+      })
+      const data = await res.json()
+      if (data.id) {
+        setResultMessage('Entry updated successfully')
+        setResultDetail(`${selected.name}'s times have been updated.`)
+        setStep('success')
+        setTimeout(() => {
+          setStep('select')
+          setSelected(null)
+          setEditClockIn('')
+          setEditClockOut('')
+          loadEmployees()
+        }, 5000)
+      } else {
+        setResultMessage('Failed to update entry')
+        setResultDetail('Please try again or see the admin.')
+        setStep('error')
+        setTimeout(() => {
+          setStep('edit')
+        }, 3000)
+      }
+    } catch {
+      setResultMessage('Connection error')
+      setResultDetail('Please check your internet connection and try again.')
+      setStep('error')
+      setTimeout(() => {
+        setStep('edit')
+      }, 3000)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  function handleStartEdit(emp: Employee) {
+    setSelected(emp)
+    setEditClockIn(emp.clockInTime || '')
+    setEditClockOut('')
+    setStep('edit')
+  }
+
   function handleBack() {
     setStep('select')
     setSelected(null)
+    setEditClockIn('')
+    setEditClockOut('')
   }
 
   const today = new Date().toLocaleDateString('en-CA', {
@@ -156,6 +212,53 @@ export default function ClockPage() {
     )
   }
 
+  // EDIT screen
+  if (step === 'edit' && selected) {
+    return (
+      <div className="min-h-screen bg-green-800 flex items-center justify-center p-4">
+        <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-sm w-full">
+          <h2 className="text-3xl font-bold text-gray-800 mb-1 text-center">{selected.name}</h2>
+          <p className="text-gray-500 text-center mb-6">Edit time entry</p>
+
+          <div className="space-y-4 mb-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Clock In Time</label>
+              <input
+                type="time"
+                value={editClockIn}
+                onChange={(e) => setEditClockIn(e.target.value)}
+                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl text-lg focus:border-green-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Clock Out Time (optional)</label>
+              <input
+                type="time"
+                value={editClockOut}
+                onChange={(e) => setEditClockOut(e.target.value)}
+                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl text-lg focus:border-green-500 outline-none"
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={handleEditSave}
+            disabled={submitting || !editClockIn}
+            className="w-full bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-xl font-bold py-4 rounded-2xl mb-3 transition-all disabled:opacity-50"
+          >
+            {submitting ? 'Saving...' : '✓ Save Changes'}
+          </button>
+          <button
+            onClick={handleBack}
+            className="w-full py-3 rounded-2xl border-2 border-gray-300 text-gray-600 text-lg font-medium hover:bg-gray-50"
+          >
+            ← Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   // CONFIRM screen
   if (step === 'confirm' && selected) {
     const action = selected.isClockedIn ? 'out' : 'in'
@@ -184,6 +287,14 @@ export default function ClockPage() {
           >
             {submitting ? 'Processing...' : isClockIn ? 'Clock In ✓' : 'Clock Out ✓'}
           </button>
+          {selected.isClockedIn && (
+            <button
+              onClick={() => handleStartEdit(selected)}
+              className="w-full py-3 rounded-2xl border-2 border-gray-300 text-gray-600 text-lg font-medium hover:bg-gray-50 mb-3"
+            >
+              ✏️ Edit Entry
+            </button>
+          )}
           <button
             onClick={handleBack}
             className="w-full py-3 rounded-2xl border-2 border-gray-300 text-gray-600 text-lg font-medium hover:bg-gray-50"
@@ -217,30 +328,40 @@ export default function ClockPage() {
           <div className="text-center text-green-200 py-8">No employees found.</div>
         ) : (
           employees.map((emp) => (
-            <button
-              key={emp.id}
-              onClick={() => handleSelectEmployee(emp)}
-              className="w-full bg-white rounded-2xl p-5 flex items-center justify-between shadow-lg active:scale-95 transition-transform"
-            >
-              <div className="text-left">
-                <p className="text-xl font-bold text-gray-800">{emp.name}</p>
-                {emp.isClockedIn && emp.clockInTime && (
-                  <p className="text-green-600 text-sm font-medium">
-                    Clocked in at {emp.clockInTime}
-                  </p>
-                )}
-                {!emp.isClockedIn && (
-                  <p className="text-gray-400 text-sm">Not clocked in</p>
-                )}
-              </div>
-              <div
-                className={`w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-sm ${
-                  emp.isClockedIn ? 'bg-red-500' : 'bg-green-600'
-                }`}
+            <div key={emp.id} className="flex gap-2">
+              <button
+                onClick={() => handleSelectEmployee(emp)}
+                className="flex-1 bg-white rounded-2xl p-5 flex items-center justify-between shadow-lg active:scale-95 transition-transform"
               >
-                {emp.isClockedIn ? 'OUT' : 'IN'}
-              </div>
-            </button>
+                <div className="text-left">
+                  <p className="text-xl font-bold text-gray-800">{emp.name}</p>
+                  {emp.isClockedIn && emp.clockInTime && (
+                    <p className="text-green-600 text-sm font-medium">
+                      Clocked in at {emp.clockInTime}
+                    </p>
+                  )}
+                  {!emp.isClockedIn && (
+                    <p className="text-gray-400 text-sm">Not clocked in</p>
+                  )}
+                </div>
+                <div
+                  className={`w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+                    emp.isClockedIn ? 'bg-red-500' : 'bg-green-600'
+                  }`}
+                >
+                  {emp.isClockedIn ? 'OUT' : 'IN'}
+                </div>
+              </button>
+              {emp.isClockedIn && emp.entryId && (
+                <button
+                  onClick={() => handleStartEdit(emp)}
+                  className="bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white rounded-2xl px-4 py-2 font-bold text-lg transition-colors"
+                  title="Edit this entry"
+                >
+                  ✏️
+                </button>
+              )}
+            </div>
           ))
         )}
       </div>
