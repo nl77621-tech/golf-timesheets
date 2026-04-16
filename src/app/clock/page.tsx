@@ -23,6 +23,9 @@ export default function ClockPage() {
   const [currentTime, setCurrentTime] = useState('')
   const [editClockIn, setEditClockIn] = useState('')
   const [editClockOut, setEditClockOut] = useState('')
+  const [editMode, setEditMode] = useState<'times' | 'hours'>('times')
+  const [editHours, setEditHours] = useState('0')
+  const [editMinutes, setEditMinutes] = useState('0')
 
   useEffect(() => {
     loadEmployees()
@@ -114,25 +117,42 @@ export default function ClockPage() {
     if (!selected || !selected.entryId) return
     setSubmitting(true)
     try {
-      const res = await fetch(`/api/time-entries/${selected.entryId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      let body: Record<string, unknown>
+
+      if (editMode === 'times') {
+        body = {
           clockIn: editClockIn,
           clockOut: editClockOut || null,
           isAdmin: false,
-        }),
+        }
+      } else {
+        body = {
+          isAdmin: true,
+          adminHours: parseInt(editHours) || 0,
+          adminMinutes: parseInt(editMinutes) || 0,
+          clockIn: null,
+          clockOut: null,
+        }
+      }
+
+      const res = await fetch(`/api/time-entries/${selected.entryId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       })
       const data = await res.json()
       if (data.id) {
         setResultMessage('Entry updated successfully')
-        setResultDetail(`${selected.name}'s times have been updated.`)
+        setResultDetail(`${selected.name}'s entry has been updated.`)
         setStep('success')
         setTimeout(() => {
           setStep('select')
           setSelected(null)
           setEditClockIn('')
           setEditClockOut('')
+          setEditMode('times')
+          setEditHours('0')
+          setEditMinutes('0')
           loadEmployees()
         }, 5000)
       } else {
@@ -159,6 +179,9 @@ export default function ClockPage() {
     setSelected(emp)
     setEditClockIn(emp.clockInTime || '')
     setEditClockOut('')
+    setEditMode('times')
+    setEditHours('0')
+    setEditMinutes('0')
     setStep('edit')
   }
 
@@ -167,6 +190,9 @@ export default function ClockPage() {
     setSelected(null)
     setEditClockIn('')
     setEditClockOut('')
+    setEditMode('times')
+    setEditHours('0')
+    setEditMinutes('0')
   }
 
   const today = new Date().toLocaleDateString('en-CA', {
@@ -214,36 +240,93 @@ export default function ClockPage() {
 
   // EDIT screen
   if (step === 'edit' && selected) {
+    const isValid = editMode === 'times' ? editClockIn : (parseInt(editHours) || 0) > 0 || (parseInt(editMinutes) || 0) > 0
     return (
       <div className="min-h-screen bg-green-800 flex items-center justify-center p-4">
         <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-sm w-full">
           <h2 className="text-3xl font-bold text-gray-800 mb-1 text-center">{selected.name}</h2>
           <p className="text-gray-500 text-center mb-6">Edit time entry</p>
 
-          <div className="space-y-4 mb-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Clock In Time</label>
-              <input
-                type="time"
-                value={editClockIn}
-                onChange={(e) => setEditClockIn(e.target.value)}
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl text-lg focus:border-green-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Clock Out Time (optional)</label>
-              <input
-                type="time"
-                value={editClockOut}
-                onChange={(e) => setEditClockOut(e.target.value)}
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl text-lg focus:border-green-500 outline-none"
-              />
-            </div>
+          {/* Mode Toggle */}
+          <div className="flex gap-2 mb-6">
+            <button
+              onClick={() => setEditMode('times')}
+              className={`flex-1 py-3 rounded-xl font-bold transition-all ${
+                editMode === 'times'
+                  ? 'bg-green-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              🕐 Clock Times
+            </button>
+            <button
+              onClick={() => setEditMode('hours')}
+              className={`flex-1 py-3 rounded-xl font-bold transition-all ${
+                editMode === 'hours'
+                  ? 'bg-green-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              ⏱️ Total Hours
+            </button>
           </div>
+
+          {/* Times Mode */}
+          {editMode === 'times' && (
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Clock In Time</label>
+                <input
+                  type="time"
+                  value={editClockIn}
+                  onChange={(e) => setEditClockIn(e.target.value)}
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl text-lg focus:border-green-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Clock Out Time (optional)</label>
+                <input
+                  type="time"
+                  value={editClockOut}
+                  onChange={(e) => setEditClockOut(e.target.value)}
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl text-lg focus:border-green-500 outline-none"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Hours Mode */}
+          {editMode === 'hours' && (
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Hours</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={editHours}
+                  onChange={(e) => setEditHours(e.target.value)}
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl text-lg focus:border-green-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Minutes</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="59"
+                  step="15"
+                  value={editMinutes}
+                  onChange={(e) => setEditMinutes(e.target.value)}
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl text-lg focus:border-green-500 outline-none"
+                />
+              </div>
+            </div>
+          )}
 
           <button
             onClick={handleEditSave}
-            disabled={submitting || !editClockIn}
+            disabled={submitting || !isValid}
             className="w-full bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-xl font-bold py-4 rounded-2xl mb-3 transition-all disabled:opacity-50"
           >
             {submitting ? 'Saving...' : '✓ Save Changes'}
